@@ -1,124 +1,162 @@
 using UnityEngine;
+using Pathfinding; 
 
 public class EnemyDadChase : MonoBehaviour
 {
-    [Header("Chase Settings")]
-    [SerializeField] private float chaseSpeed = 3.5f;   // 추적 속도
-    [SerializeField] private float chaseDistance = 5f;  // 추적 범위
-    
-    // 플레이어의 LightControl 스크립트를 인스펙터에서 할당
-    [Header("Component References")]
-    [SerializeField] private TorchLightToggle lightControlScript; 
-    
-    private Transform player;                              // 플레이어 Transform
-    private bool isChasing = false;                        // 추적 중 여부
-    private SpriteRenderer spriteRenderer;
-    private Rigidbody2D rb;                                // Rigidbody2D 참조
-    // private Collider2D chaseCollider;  // ❌ 이 변수는 더 이상 사용하지 않아도 됩니다.
+    // A* Pathfinding 컴포넌트
+    public Seeker seeker;
+    public AIPath aiPath;
+
+    [Header("Target & Light")]
+    public Transform Player;
+    // 플레이어의 Light Script (TorchLightToggle) 컴포넌트를 연결합니다.
+    public TorchLightToggle LightControlScript; 
+
+    [Header("Movement & State")]
+    public float ChaseSpeed = 3f;
+    public float FleeSpeed = 2f; 
+    public float ChaseDistance = 5f; // 플레이어 추격 시작 거리
+    public float FleeDistance = 10f; // 도망갈 때 플레이어로부터 멀어지려는 거리
+
+    private bool isChasing = false;
+    private bool isFleeing = false;
+
 
     void Start()
     {
-        // 몬스터 자신에게서 컴포넌트 가져오기
-        spriteRenderer = GetComponent<SpriteRenderer>();
-        rb = GetComponent<Rigidbody2D>(); 
-        // chaseCollider는 OnTrigger/OnCollision 함수가 자동으로 처리하므로 Start에서 할당하지 않아도 됩니다.
+        // 컴포넌트 자동 참조
+        if (aiPath == null) aiPath = GetComponent<AIPath>();
+        if (seeker == null) seeker = GetComponent<Seeker>();
+
+        // 초기 상태: 추적 비활성화
+        if (aiPath != null) aiPath.enabled = false;
     }
-    
+
     void Update()
     {
-        // ... (Update 함수는 변경 없음)
-        if (player != null && lightControlScript != null) 
-        {
-            if (isChasing && !lightControlScript.IsLightOn)
-            {
-                ChasePlayer();
-            }
-            else if (lightControlScript.IsLightOn)
-            {
-                FleePlayer();
-            }
-        }
-        else if (player == null)
-        {
-            rb.velocity = Vector2.zero;
-            // Debug.Log("Player가 null입니다! (범위 밖이거나 아직 발견되지 않음)");
-        }
-        else if (lightControlScript == null)
-        {
-            Debug.LogError("LightControlScript가 인스펙터에 할당되지 않았습니다! 반드시 할당해주세요.");
-        }
-    }
+        // 필수 컴포넌트 및 타겟 확인
+        if (Player == null || LightControlScript == null || aiPath == null) return;
 
-    void ChasePlayer()
-    {
-        // ... (ChasePlayer 함수는 변경 없음)
-        float distanceToPlayer = Vector2.Distance(transform.position, player.position);
+        // A. 상태 변수 및 거리 확인
+        bool isLightActive = LightControlScript.IsLightOn; 
+        // 💡 지속적으로 플레이어와의 거리를 계산합니다.
+        float distanceToPlayer = Vector3.Distance(transform.position, Player.position);
         
-        if (distanceToPlayer <= chaseDistance)
+        // --- 1. 상태 전환 및 제어 로직 ---
+        
+        // 1-1. 빛이 켜진 경우 (Flee)
+        if (isLightActive)
         {
-            Vector2 direction = (player.position - transform.position).normalized;
-            rb.velocity = direction * chaseSpeed;
-            // ... (스프라이트 반전 로직)
-            if (player.position.x < transform.position.x)
+            if (!isFleeing)
             {
-                spriteRenderer.flipX = true;
-            }
-            else
-            {
-                spriteRenderer.flipX = false;
+                StartFleeing();
             }
         }
-        else
+        // 1-2. 빛이 꺼진 경우 (Stop Flee / Chase / Idle)
+        else 
         {
-            rb.velocity = Vector2.zero;
+            // (A) 도망 중이었다면 즉시 중지하여 isFleeing을 false로 리셋
+            if (isFleeing)
+            {
+                StopFleeing(); 
+            }
+
+            // (B) 횃불이 꺼져있고, 추격 범위 안에 들어왔을 경우 추격 시작
+            if (!isFleeing && distanceToPlayer < ChaseDistance)
+            {
+                if (!isChasing) // 이미 추격 중이 아니라면
+                {
+                    StartChasing();
+                }
+            }
+            // (C) 추격 중이었는데, 플레이어가 범위 밖으로 나갔을 경우 추격 중지
+            else if (isChasing && distanceToPlayer >= ChaseDistance)
+            {
+                StopChasing();
+            }
+        }
+        
+        // --- 2. 이동 처리 ---
+        
+        if (isFleeing)
+        {
+            // 몬스터 위치에서 플레이어 반대 방향으로 멀어지는 가상 목표 지점 계산
+            Vector3 directionToPlayer = Player.position - transform.position;
+            Vector3 fleeDirection = -directionToPlayer.normalized;
+            Vector3 targetPosition = transform.position + fleeDirection * FleeDistance;
+
+            // 💡 끼임 현상 방지: 유효한 경로 노드를 찾습니다.
+            NNConstraint constraint = NNConstraint.None;
+            NNInfo nearestNodeInfo = AstarPath.active.GetNearest(targetPosition, constraint);
+            Vector3 nearestValidTarget = nearestNodeInfo.position;
+
+            // AIPath의 목표 지점을 가장 가까운 유효 노드로 설정
+            aiPath.destination = nearestValidTarget;
+            
+            if (!aiPath.enabled) aiPath.enabled = true;
+            aiPath.maxSpeed = FleeSpeed;
+        }
+
+        else if (isChasing)
+        {
+            // 추격 중일 때는 플레이어를 목표로 추격 유지
+            if (!aiPath.enabled) aiPath.enabled = true;
+            aiPath.target = Player;
+            aiPath.maxSpeed = ChaseSpeed;
         }
     }
 
-    void FleePlayer()
-    {
-        // ... (FleePlayer 함수는 변경 없음)
-        Vector2 direction = (transform.position - player.position).normalized;
-        rb.velocity = direction * chaseSpeed;
+    // ⚠️ OnTriggerEnter2D와 OnTriggerExit2D 함수는 제거하거나 주석 처리해야 합니다.
+    // 이제 상태 관리가 Update()의 거리 기반으로 이루어집니다.
+    /*
+    private void OnTriggerEnter2D(Collider2D other) { }
+    private void OnTriggerExit2D(Collider2D other) { }
+    */
+    
+    // --------------------------------------------------------
+    // 상태 변경 도우미 함수 (이전과 동일)
+    // --------------------------------------------------------
 
-        if (player.position.x < transform.position.x)
-        {
-            spriteRenderer.flipX = false;
-        }
-        else
-        {
-            spriteRenderer.flipX = true;
-        }
+    void StartChasing()
+    {
+        if (isFleeing) StopFleeing();
+        
+        isChasing = true;
+        
+        aiPath.target = Player; 
+        aiPath.enabled = true;
+        aiPath.maxSpeed = ChaseSpeed;
+        Debug.Log("추격 시작!");
     }
 
-    // 🎯 [1] Circle Collider (Is Trigger) : 플레이어가 추적 범위에 들어오면 추적 시작
-    void OnTriggerEnter2D(Collider2D collision)
+    void StopChasing()
     {
-        if (collision.CompareTag("Player"))
+        isChasing = false;
+        if (!isFleeing)
         {
-            player = collision.transform;
-            isChasing = true;
-            Debug.Log("플레이어 발견, 추적 시작!");
+            aiPath.enabled = false;
+            seeker.CancelCurrentPathRequest();
+            Debug.Log("추격 중지!");
         }
     }
     
-    // 🎯 [2] Circle Collider (Is Trigger) : 플레이어가 추적 범위 밖으로 나가면 추적 종료
-    void OnTriggerExit2D(Collider2D collision)
+    void StartFleeing()
     {
-        if (collision.CompareTag("Player"))
-        {
-            isChasing = false;
-            player = null;
-            Debug.Log("플레이어가 멀어져 추적 종료.");
-        }
+        if (isChasing) StopChasing(); 
+        
+        isFleeing = true;
+        aiPath.target = null;
+        aiPath.enabled = true;
+        aiPath.maxSpeed = FleeSpeed;
+        
+        Debug.Log("불 감지! 도망 시작!");
     }
-    
-    // 💥 [3] Capsule Collider (NOT Trigger) : 플레이어와 물리적으로 닿았을 때 (원하는 로그 출력)
-    private void OnCollisionEnter2D(Collision2D collision)
+
+    void StopFleeing()
     {
-        if (collision.gameObject.CompareTag("Player"))
-        {
-            // 이 로그는 캡슐 콜라이더가 플레이어와 '딱' 붙었을 때(물리적 충돌) 출력됩니다.
-            Debug.Log($"💥 몬스터가 플레이어({collision.gameObject.name})와 물리적으로 충돌했습니다!");
-        }
+        isFleeing = false;
+        aiPath.enabled = false;
+        seeker.CancelCurrentPathRequest();
+        Debug.Log("도망 중지!");
     }
 }

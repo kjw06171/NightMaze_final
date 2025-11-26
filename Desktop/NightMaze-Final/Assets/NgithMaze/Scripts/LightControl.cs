@@ -75,4 +75,6 @@ public class TorchLightToggle : MonoBehaviour
 
         Debug.Log("횃불이 다시 밝아졌습니다!");
     }
+
+
 }
