@@ -19,9 +19,8 @@ public class EnemyDadChase : MonoBehaviour
     public float ChaseDistance = 5f; // 플레이어 추격 시작 거리
     public float FleeDistance = 10f; // 도망갈 때 플레이어로부터 멀어지려는 거리
 
-    [Header("Collision Filter")]
-    // 💡 Inspector에서 플레이어의 감지 콜리더 레이어가 반드시 연결되어야 합니다!
-    public LayerMask PlayerSensorLayer; 
+    // Collision Filter 변수는 이제 감지 로직을 담당할 MonsterSensorTrigger.cs로 이동합니다.
+    // public LayerMask PlayerSensorLayer; // 이 줄을 제거하세요!
 
     private bool isChasing = false;
     private bool isFleeing = false;
@@ -47,14 +46,14 @@ public class EnemyDadChase : MonoBehaviour
         
         // --- 1. 상태 전환 및 제어 로직 (Flee > Chase > Patrol 순) ---
         
-        // 1-1. [수정] 빛이 켜져 있고 AND 플레이어가 추격 범위(ChaseDistance) 이내에 있을 경우 (Flee 최우선)
+        // 1-1. 빛이 켜져 있고 AND 플레이어가 ChaseDistance 이내에 있을 경우 (Flee 최우선)
         if (isLightActive && distanceToPlayer < ChaseDistance)
         {
             if (patrolScript.IsPatrolling) patrolScript.StopPatrolling();
             if (isChasing) StopChasing(); 
             if (!isFleeing) StartFleeing();
         }
-        // 1-2. 빛이 꺼지거나, 도망 범위 밖으로 나갔을 경우
+        // 1-2. 빛이 꺼지거나, 도망 조건이 충족되지 않을 경우
         else 
         {
             if (isFleeing) StopFleeing(); // 도망 중지
@@ -99,26 +98,18 @@ public class EnemyDadChase : MonoBehaviour
     }
     
     // --------------------------------------------------------
-    // 💥 Trigger 감지 함수: 몬스터 Non-Trigger 콜리더와 플레이어 Trigger 콜리더 접촉 시
+    // 💥 Trigger 감지 함수: (제거됨 - MonsterSensorTrigger.cs로 이동)
     // --------------------------------------------------------
-    private void OnTriggerEnter2D(Collider2D other)
-    {
-        // LayerMask를 사용하여 상대방(other) 콜리더가 오직 'PlayerSensorLayer'에 속하는지 확인합니다.
-        if (((1 << other.gameObject.layer) & PlayerSensorLayer) != 0)
-        {
-            Debug.Log($"💥 몬스터가 플레이어의 [감지 센서]와 접촉했습니다! (게임 오버 로직 실행)");
-            
-            // 여기에 게임 오버 또는 데미지 처리 로직을 추가하세요.
-        }
-    }
+    // private void OnTriggerEnter2D(Collider2D other) 함수는 제거되었습니다.
     
     // --------------------------------------------------------
-    // 이동 처리 함수 및 상태 변경 도우미 함수 
+    // 이동 처리 함수 및 상태 변경 도우미 함수 (그대로 유지)
     // --------------------------------------------------------
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
-        // 물리 충돌(Non-Trigger + Non-Trigger) 로직이 필요하다면 여기에 위치합니다.
+        // 몬스터의 큰 원 콜리더(몸체, Non-Trigger)가 다른 Non-Trigger 오브젝트(예: 벽, 플레이어 몸체)와
+        // 물리적으로 충돌했을 때 사용됩니다.
     }
 
     private void HandleFleeMovement()
